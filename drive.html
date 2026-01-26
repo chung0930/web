@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>小故事工坊 雲端硬碟服務系統</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: { google: { blue: '#1a73e8', bg: '#f8f9fa' } }
+                }
+            }
+        }
+    </script>
+    <style>
+        /* 核心樣式：防止穿模與優化滾動 */
+        body { background-color: #f8f9fa; user-select: none; -webkit-tap-highlight-color: transparent; }
+        .truncate-text { display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; text-overflow: ellipsis; word-break: break-all; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #dadce0; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #bdc1c6; }
+        
+        /* 拖拽視覺反饋 */
+        .drag-target { border: 2px dashed #1a73e8 !important; background-color: #e8f0fe !important; transform: scale(0.98); }
+        .dragging { opacity: 0.5; }
+
+        /* 網格與列表模式切換的關鍵 CSS */
+        #fileContainer.view-grid {
+            display: grid;
+            /* 這裡使用變數來控制縮放 */
+            grid-template-columns: repeat(auto-fill, minmax(var(--grid-size, 140px), 1fr));
+            gap: 1rem;
+            align-content: start;
+        }
+        #fileContainer.view-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+        
+        /* 列表模式下的子元素樣式覆寫 */
+        #fileContainer.view-list .file-card {
+            flex-direction: row;
+            height: 60px;
+            width: 100%;
+            padding: 0 1rem;
+            align-items: center;
+        }
+        #fileContainer.view-list .file-icon { width: 40px; height: 40px; margin-right: 1rem; font-size: 1.5rem; }
+        #fileContainer.view-list .file-name { text-align: left; font-size: 0.95rem; }
+        #fileContainer.view-list .file-info { display: flex; margin-left: auto; gap: 2rem; font-size: 0.85rem; color: #5f6368; }
+
+        /* 網格模式下的預設樣式 */
+        .file-card {
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            background: white; border: 1px solid #dadce0; border-radius: 12px;
+            cursor: pointer; transition: all 0.2s; position: relative;
+            aspect-ratio: 1 / 1; /* 保持正方形 */
+            padding: 10px;
+        }
+        #fileContainer.view-list .file-card { aspect-ratio: auto; } /* 列表模式取消正方形限制 */
+        
+        .file-card:hover { box-shadow: 0 1px 3px 0 rgba(60,64,67,0.3); background-color: #e8f0fe; border-color: transparent; }
+        .file-icon { width: 100%; height: 65%; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+        .file-icon img { width: 100%; height: 100%; object-fit: contain; }
+        .file-name { margin-top: 8px; font-size: 0.85rem; color: #3c4043; text-align: center; width: 100%; }
+        
+        /* Loading 動畫 */
+        .loader { border: 3px solid #f3f3f3; border-top: 3px solid #1a73e8; border-radius: 50%; width: 24px; height: 24px; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body class="h-screen flex flex-col overflow-hidden text-gray-700">
+
+    <div id="loginOverlay" class="fixed inset-0 bg-white z-50 flex flex-col items-center justify-center p-4">
+        <div class="w-full max-w-sm bg-white p-8 rounded-2xl shadow-xl border text-center">
+            <div class="text-blue-600 text-5xl mb-4"><i class="fab fa-google-drive"></i></div>
+            <h2 class="text-2xl font-bold mb-2 text-gray-800">CloudHub</h2>
+            <p class="text-gray-500 mb-6 text-sm">請輸入帳號密碼以存取雲端硬碟</p>
+            
+            <input type="text" id="accInput" placeholder="帳號" class="w-full mb-3 px-4 py-3 rounded-lg border bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all">
+            <input type="password" id="pwdInput" placeholder="密碼" class="w-full mb-6 px-4 py-3 rounded-lg border bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all">
+            
+            <button onclick="handleLogin()" id="loginBtn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg transition-colors flex justify-center items-center gap-2">
+                <span>登入</span>
+            </button>
+            <p id="loginMsg" class="mt-4 text-red-500 text-sm h-5"></p>
+        </div>
+        <p class="mt-8 text-gray-400 text-xs">Powered by Google Apps Script</p>
+    </div>
+
+    <header class="bg-white border-b h-16 flex items-center justify-between px-4 lg:px-6 shrink-0 z-20">
+        <div class="flex items-center gap-4">
+            <button class="lg:hidden text-gray-500 hover:bg-gray-100 p-2 rounded-full" onclick="toggleSidebar()">
+                <i class="fas fa-bars text-xl"></i>
+            </button>
+            <div class="flex items-center gap-2 text-gray-700 font-bold text-xl select-none">
+                <i class="fab fa-google-drive text-blue-600 text-2xl"></i>
+                <span class="hidden sm:inline">CloudHub</span>
+            </div>
+        </div>
+
+        <div class="flex-1 px-4 lg:px-12 truncate hidden md:block">
+            <div class="bg-gray-100 rounded-lg px-4 py-2 flex items-center text-gray-600 text-sm">
+                <i class="fas fa-search mr-3"></i>
+                <span id="breadcrumbs" class="truncate">根目錄</span>
+            </div>
+        </div>
+
+        <div class="flex items-center gap-2">
+            <div id="zoomControl" class="hidden md:flex items-center gap-2 mr-4 bg-gray-100 px-3 py-1 rounded-full">
+                <i class="fas fa-image text-xs text-gray-500"></i>
+                <input type="range" min="100" max="300" value="140" class="w-24 accent-blue-600 h-1" oninput="updateGridSize(this.value)">
+                <i class="fas fa-image text-lg text-gray-500"></i>
+            </div>
+
+            <div class="bg-gray-100 rounded-lg p-1 flex">
+                <button onclick="switchView('list')" class="p-2 rounded-md hover:bg-white hover:shadow-sm text-gray-600 transition-all" id="btnList"><i class="fas fa-list"></i></button>
+                <button onclick="switchView('grid')" class="p-2 rounded-md hover:bg-white hover:shadow-sm text-gray-600 transition-all bg-white shadow-sm" id="btnGrid"><i class="fas fa-th-large"></i></button>
+            </div>
+
+            <div class="ml-2 w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-sm cursor-pointer" title="登出" onclick="logout()">
+                <span id="userAvatar">U</span>
+            </div>
+        </div>
+    </header>
+
+    <div class="flex flex-1 overflow-hidden relative">
+        <aside id="sidebar" class="bg-white w-64 border-r flex flex-col absolute lg:static h-full transform -translate-x-full lg:translate-x-0 transition-transform duration-300 z-10 shadow-xl lg:shadow-none">
+            <div class="p-4">
+                <button class="w-full bg-white text-gray-700 shadow border hover:shadow-md py-3 rounded-full font-medium flex items-center justify-center gap-2 transition-all">
+                    <i class="fas fa-plus text-google-blue"></i>
+                    <span>新增</span>
+                </button>
+            </div>
+            <nav class="flex-1 overflow-y-auto py-2">
+                <a href="#" onclick="loadFiles('root')" class="flex items-center gap-4 px-6 py-2 bg-blue-50 text-blue-700 rounded-r-full font-medium my-1 border-l-4 border-blue-600">
+                    <i class="fas fa-hard-drive"></i> 雲端
+                </a>
+                <a class="flex items-center gap-4 px-6 py-2 text-gray-600 hover:bg-gray-100 rounded-r-full my-1 cursor-not-allowed opacity-50">
+                    <i class="fas fa-user-friends"></i> 共用項目
+                </a>
+                <a class="flex items-center gap-4 px-6 py-2 text-gray-600 hover:bg-gray-100 rounded-r-full my-1 cursor-not-allowed opacity-50">
+                    <i class="fas fa-clock"></i> 最近使用
+                </a>
+            </nav>
+            <div class="p-4 text-xs text-gray-400 text-center">Storage Used: 50%</div>
+        </aside>
+
+        <div id="sidebarOverlay" class="fixed inset-0 bg-black/50 z-0 hidden lg:hidden" onclick="toggleSidebar()"></div>
+
+        <main class="flex-1 bg-white md:bg-[#f8f9fa] overflow-y-auto p-4 relative" id="mainArea">
+            <div class="md:hidden mb-4 text-sm text-gray-500 truncate px-2" id="mobileBreadcrumbs">首頁</div>
+
+            <div id="loadingIndicator" class="hidden absolute inset-0 bg-white/80 z-20 flex items-center justify-center flex-col">
+                <div class="loader mb-2"></div>
+                <div class="text-sm text-gray-500">載入中...</div>
+            </div>
+
+            <div id="fileContainer" class="view-grid" style="--grid-size: 140px;">
+                </div>
+        </main>
+    </div>
+
+    <div id="contextMenu" class="hidden fixed bg-white border shadow-lg rounded-lg py-1 w-48 z-50 text-sm text-gray-700">
+        <button id="ctxDownload" class="w-full text-left px-4 py-2 hover:bg-gray-100 flex items-center gap-3">
+            <i class="fas fa-download text-gray-400 w-4"></i> 下載
+        </button>
+        <button id="ctxDelete" class="w-full text-left px-4 py-2 hover:bg-gray-100 flex items-center gap-3 text-red-600 hidden">
+            <i class="fas fa-trash w-4"></i> 刪除
+        </button>
+    </div>
+
+    <script>
+        // 設定你的 Apps Script 網址
+        const API_URL = "https://script.google.com/macros/s/AKfycbwuro4sN2fPjQo5nAHMoeioBhmiv3tYXEO1haqcIfKrWNAgBNBH3FRS0Zz5leCbSas14w/exec";
+
+        // 狀態管理
+        let state = {
+            token: localStorage.getItem('hub_token') || null,
+            role: localStorage.getItem('hub_role') || null,
+            currentFolder: 'root',
+            folderHistory: [{id: 'root', name: '首頁'}],
+            files: [],
+            view: 'grid' // grid 或 list
+        };
+
+        // DOM 元素
+        const els = {
+            loginOverlay: document.getElementById('loginOverlay'),
+            fileContainer: document.getElementById('fileContainer'),
+            loading: document.getElementById('loadingIndicator'),
+            breadcrumbs: document.getElementById('breadcrumbs'),
+            mobileBreadcrumbs: document.getElementById('mobileBreadcrumbs'),
+            sidebar: document.getElementById('sidebar'),
+            sidebarOverlay: document.getElementById('sidebarOverlay'),
+            ctxMenu: document.getElementById('contextMenu')
+        };
+
+        // ========================
+        // 初始化與登入系統
+        // ========================
+        window.onload = () => {
+            if (state.token) {
+                els.loginOverlay.classList.add('hidden');
+                loadFiles('root');
+                updateUserUI();
+            }
+        };
+
+        async function handleLogin() {
+            const acc = document.getElementById('accInput').value;
+            const pwd = document.getElementById('pwdInput').value;
+            const btn = document.getElementById('loginBtn');
+            const msg = document.getElementById('loginMsg');
+
+            if(!acc || !pwd) return msg.innerText = "請輸入帳號與密碼";
+
+            btn.innerHTML = '<div class="loader border-white border-t-blue-600 w-4 h-4"></div>';
+            msg.innerText = "";
+
+            try {
+                // 發送 POST 請求
+                const res = await fetch(API_URL, {
+                    method: "POST",
+                    body: JSON.stringify({ action: "login", acc: acc, pwd: pwd })
+                });
+                const data = await res.json();
+
+                if (data.status === "success") {
+                    // 登入成功，存 Token
+                    state.token = data.token;
+                    state.role = data.role;
+                    state.currentFolder = data.rootFolderId;
+                    
+                    localStorage.setItem('hub_token', data.token);
+                    localStorage.setItem('hub_role', data.role);
+                    localStorage.setItem('hub_acc', acc);
+
+                    els.loginOverlay.classList.add('hidden');
+                    loadFiles(state.currentFolder);
+                    updateUserUI();
+                } else {
+                    msg.innerText = data.msg;
+                }
+            } catch (e) {
+                msg.innerText = "連線失敗，伺服器錯誤";
+                console.error(e);
+            } finally {
+                btn.innerHTML = '<span>登入</span>';
+            }
+        }
+
+        function logout() {
+            localStorage.clear();
+            location.reload();
+        }
+
+        function updateUserUI() {
+            const acc = localStorage.getItem('hub_acc') || 'U';
+            document.getElementById('userAvatar').innerText = acc.charAt(0).toUpperCase();
+        }
+
+        // ========================
+        // 檔案列表與渲染
+        // ========================
+        async function loadFiles(folderId) {
+            state.currentFolder = folderId;
+            els.loading.classList.remove('hidden');
+            els.fileContainer.innerHTML = ''; // 清空
+
+            try {
+                const res = await fetch(API_URL, {
+                    method: "POST",
+                    body: JSON.stringify({ action: "list", folderId: folderId, token: state.token })
+                });
+                const data = await res.json();
+
+                if (data.status === "success") {
+                    state.files = data.files;
+                    renderFiles();
+                    updateBreadcrumbs();
+                } else {
+                    alert(data.msg);
+                    if(data.msg.includes("權限")) logout();
+                }
+            } catch (e) {
+                console.error(e);
+            } finally {
+                els.loading.classList.add('hidden');
+            }
+        }
+
+        function renderFiles() {
+            els.fileContainer.innerHTML = '';
+            
+            if (state.files.length === 0) {
+                els.fileContainer.innerHTML = `<div class="col-span-full text-center text-gray-400 py-10">這個資料夾是空的</div>`;
+                return;
+            }
+
+            state.files.forEach(file => {
+                const isFolder = file.type === 'folder';
+                const iconHtml = getIcon(file);
+                
+                const card = document.createElement('div');
+                card.className = 'file-card group';
+                
+                // 拖拽屬性
+                if (state.role !== 'VIEWER') {
+                    card.setAttribute('draggable', 'true');
+                    card.ondragstart = (e) => dragStart(e, file);
+                    if (isFolder) {
+                        card.ondragover = (e) => dragOver(e);
+                        card.ondragleave = (e) => dragLeave(e);
+                        card.ondrop = (e) => dropFile(e, file);
+                    }
+                }
+
+                // 點擊事件 (左鍵)
+                card.onclick = () => {
+                    if (isFolder) {
+                        pushHistory(file.id, file.name);
+                        loadFiles(file.id);
+                    } else {
+                        // 預覽或選取 (手機版邏輯可擴充)
+                        window.open(file.url, '_blank');
+                    }
+                };
+
+                // 右鍵事件
+                card.oncontextmenu = (e) => showContextMenu(e, file);
+
+                // HTML 結構 (支援網格與列表兩種顯示)
+                card.innerHTML = `
+                    <div class="file-icon">${iconHtml}</div>
+                    <div class="file-name truncate-text" title="${file.name}">${file.name}</div>
+                    <div class="file-info hidden group-hover:flex view-list-only">
+                        <span>${file.date}</span>
+                        <span class="ml-4">${file.size}</span>
+                    </div>
+                `;
+                
+                els.fileContainer.appendChild(card);
+            });
+        }
+
+        function getIcon(file) {
+            if (file.type === 'folder') return '<i class="fas fa-folder text-yellow-400 text-5xl"></i>';
+            if (file.thumb) return `<img src="${file.thumb}" loading="lazy">`;
+            return '<i class="fas fa-file text-gray-400 text-4xl"></i>';
+        }
+
+        // ========================
+        // 視圖切換與縮放
+        // ========================
+        function switchView(mode) {
+            state.view = mode;
+            const container = els.fileContainer;
+            const btnGrid = document.getElementById('btnGrid');
+            const btnList = document.getElementById('btnList');
+            const zoomControl = document.getElementById('zoomControl');
+
+            if (mode === 'grid') {
+                container.classList.remove('view-list');
+                container.classList.add('view-grid');
+                btnGrid.classList.add('bg-white', 'shadow-sm');
+                btnList.classList.remove('bg-white', 'shadow-sm');
+                zoomControl.classList.remove('hidden'); // 顯示滑桿
+                zoomControl.classList.add('md:flex');
+            } else {
+                container.classList.remove('view-grid');
+                container.classList.add('view-list');
+                btnList.classList.add('bg-white', 'shadow-sm');
+                btnGrid.classList.remove('bg-white', 'shadow-sm');
+                zoomControl.classList.add('hidden'); // 隱藏滑桿
+                zoomControl.classList.remove('md:flex');
+            }
+        }
+
+        function updateGridSize(size) {
+            els.fileContainer.style.setProperty('--grid-size', size + 'px');
+        }
+
+        // ========================
+        // 拖拽邏輯 (Drag & Drop)
+        // ========================
+        function dragStart(e, file) {
+            e.dataTransfer.setData('text/plain', JSON.stringify({id: file.id, name: file.name}));
+            e.target.classList.add('dragging');
+        }
+
+        function dragOver(e) {
+            e.preventDefault();
+            e.currentTarget.classList.add('drag-target');
+        }
+
+        function dragLeave(e) {
+            e.currentTarget.classList.remove('drag-target');
+        }
+
+        async function dropFile(e, targetFolder) {
+            e.preventDefault();
+            e.currentTarget.classList.remove('drag-target');
+            
+            const data = JSON.parse(e.dataTransfer.getData('text/plain'));
+            const fileId = data.id;
+            
+            if (fileId === targetFolder.id) return; // 不能拖給自己
+            if (!confirm(`確定將 ${data.name} 移動到 ${targetFolder.name} 嗎？`)) return;
+
+            // 呼叫 API
+            els.loading.classList.remove('hidden');
+            try {
+                const res = await fetch(API_URL, {
+                    method: "POST",
+                    body: JSON.stringify({ 
+                        action: "move", 
+                        fileId: fileId, 
+                        targetId: targetFolder.id, 
+                        token: state.token 
+                    })
+                });
+                const result = await res.json();
+                if (result.status === 'success') {
+                    loadFiles(state.currentFolder); // 重新整理
+                } else {
+                    alert(result.msg);
+                }
+            } catch(e) {
+                console.error(e);
+            }
+        }
+
+        // ========================
+        // 導航與 UI 工具
+        // ========================
+        function pushHistory(id, name) {
+            state.folderHistory.push({id, name});
+        }
+        
+        function updateBreadcrumbs() {
+            // 簡單實作：只顯示最後一層
+            const current = state.folderHistory[state.folderHistory.length - 1];
+            const html = `<span class="font-bold text-gray-800">${current.name}</span>`;
+            els.breadcrumbs.innerHTML = html;
+            els.mobileBreadcrumbs.innerHTML = html;
+        }
+
+        function toggleSidebar() {
+            els.sidebar.classList.toggle('-translate-x-full');
+            els.sidebarOverlay.classList.toggle('hidden');
+        }
+
+        // 右鍵選單
+        function showContextMenu(e, file) {
+            e.preventDefault();
+            const menu = els.ctxMenu;
+            menu.style.left = e.pageX + 'px';
+            menu.style.top = e.pageY + 'px';
+            menu.classList.remove('hidden');
+
+            // 下載按鈕
+            document.getElementById('ctxDownload').onclick = () => window.open(file.url, '_blank');
+
+            // 刪除按鈕 (權限過濾)
+            const btnDel = document.getElementById('ctxDelete');
+            if (state.role === 'ADMIN') {
+                btnDel.classList.remove('hidden');
+                btnDel.onclick = async () => {
+                    if(confirm(`刪除 ${file.name}？`)) {
+                        await fetch(API_URL, { method: "POST", body: JSON.stringify({action: "delete", fileId: file.id, token: state.token})});
+                        loadFiles(state.currentFolder);
+                        menu.classList.add('hidden');
+                    }
+                };
+            } else {
+                btnDel.classList.add('hidden');
+            }
+
+            // 點擊其他地方關閉選單
+            document.onclick = () => menu.classList.add('hidden');
+        }
+
+        // 點擊空白處關閉選單
+        document.addEventListener('click', (e) => {
+            if (!els.ctxMenu.contains(e.target)) els.ctxMenu.classList.add('hidden');
+        });
+
+    </script>
+</body>
+</html>
