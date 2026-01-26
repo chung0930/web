@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>小故事工坊 雲端硬碟服務</title>
+    <title>小故事工坊 雲端硬碟服務系統</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script>
@@ -107,7 +107,7 @@
         <div class="flex-1 px-4 lg:px-12 truncate hidden md:block">
             <div class="bg-gray-100 rounded-lg px-4 py-2 flex items-center text-gray-600 text-sm">
                 <i class="fas fa-search mr-3"></i>
-                <span id="breadcrumbs" class="truncate">首頁</span>
+                <span id="breadcrumbs" class="truncate">根目錄</span>
             </div>
         </div>
 
@@ -139,7 +139,7 @@
             </div>
             <nav class="flex-1 overflow-y-auto py-2">
                 <a href="#" onclick="loadFiles('root')" class="flex items-center gap-4 px-6 py-2 bg-blue-50 text-blue-700 rounded-r-full font-medium my-1 border-l-4 border-blue-600">
-                    <i class="fas fa-hard-drive"></i> 我的雲端
+                    <i class="fas fa-hard-drive"></i> 雲端
                 </a>
                 <a class="flex items-center gap-4 px-6 py-2 text-gray-600 hover:bg-gray-100 rounded-r-full my-1 cursor-not-allowed opacity-50">
                     <i class="fas fa-user-friends"></i> 共用項目
@@ -248,10 +248,10 @@
                     msg.innerText = data.msg;
                 }
             } catch (e) {
-                msg.innerText = "連線失敗，請檢查網路或 API";
+                msg.innerText = "連線失敗，伺服器錯誤";
                 console.error(e);
             } finally {
-                btn.innerHTML = '<span>登入系統</span>';
+                btn.innerHTML = '<span>登入</span>';
             }
         }
 
@@ -299,7 +299,7 @@
             els.fileContainer.innerHTML = '';
             
             if (state.files.length === 0) {
-                els.fileContainer.innerHTML = `<div class="col-span-full text-center text-gray-400 py-10">此資料夾是空的</div>`;
+                els.fileContainer.innerHTML = `<div class="col-span-full text-center text-gray-400 py-10">這個資料夾是空的</div>`;
                 return;
             }
 
